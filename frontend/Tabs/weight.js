@@ -11,7 +11,10 @@ const gainColor = "lightgreen";
 export default function WeightScreen() {
 
     const [today] = useState(moment());
-    const [startOfWeek] = useState(today.clone().startOf('isoWeek'));
+    const [startOfThisWeek] = useState(today.clone().startOf('isoWeek'));
+    const [endOfThisWeek] = useState(today.clone().endOf('isoWeek'));
+    const [startOfLastWeek] = useState(today.clone().subtract(7, 'days').startOf('isoWeek'));
+    const [endOfLastWeek] = useState(today.clone().subtract(7, 'days').endOf('isoWeek'));
     const [selectedDate, setSelectedDate] = useState(today.format('YYYY-MM-DD'));
     const [selectedDateDay, setSelectedDateDay] = useState(today.format('DD'));
     const [selectedDateLabel, setSelectedDateLabel] = useState(today.format('ddd'));
@@ -19,14 +22,23 @@ export default function WeightScreen() {
     const [weightPopup, setWeightPopupVisible] = useState(false);
     const [weightInput, setWeightInput] = useState("");
     const [weekAvg, setWeekAvg] = useState(0);
+    const [lastWeekAvg, setLastWeekAvg] = useState(0);
     const slideAnim = useRef(new Animated.Value(1300)).current;
 
-    // Removed <TextInput> type annotation
+
     const inputRef = useRef(null);
 
 
-    const days = Array.from({ length: 7 }, (_, i) => {
-        const d = startOfWeek.clone().add(i, 'days');
+    const daysThisWeek = Array.from({ length: 7 }, (_, i) => {
+        const d = startOfThisWeek.clone().add(i, 'days');
+        return {
+            label: d.format('ddd'),
+            date: d.format('YYYY-MM-DD'),
+            dayNumber: d.format('D'),
+        };
+    });
+    const daysLastWeek = Array.from({ length: 7 }, (_, i) => {
+        const d = startOfLastWeek.clone().add(i, 'days');
         return {
             label: d.format('ddd'),
             date: d.format('YYYY-MM-DD'),
@@ -34,22 +46,35 @@ export default function WeightScreen() {
         };
     });
 
+
     const loadWeights = async () => {
         const res = await getWeight(
-            startOfWeek.format("YYYY-MM-DD"),
-            today.format("YYYY-MM-DD")
+            startOfThisWeek.format("YYYY-MM-DD"),
+            endOfThisWeek.format("YYYY-MM-DD")
         );
+
         const map = {};
-        days.forEach((d, index) => {
+        daysThisWeek.forEach((d, index) => {
             map[d.date] = res.data[index];
         });
-        calculateWeekAvg()
+        const result = await getWeight(
+            startOfLastWeek.format("YYYY-MM-DD"),
+            endOfLastWeek.format("YYYY-MM-DD")
+        );
+        daysLastWeek.forEach((d, index) => {
+            map[d.date] = result.data[index];
+        });
+        console.log(result);
+        // compute averages from the fetched map (don't rely on stale state)
         setWeightsByDate(map);
+        setWeekAvg(calculateWeekAvg(daysThisWeek, map));
+        setLastWeekAvg(calculateWeekAvg(daysLastWeek, map));
 
     };
     useEffect(() => {
         loadWeights();
-    }, [startOfWeek, today]);
+
+    }, [startOfThisWeek, endOfThisWeek]);
 
     const changeWeight = (date, dateLabel, dateDay) => {
         setSelectedDate(date);
@@ -70,7 +95,7 @@ export default function WeightScreen() {
 
     const slideIn = () => {
         Animated.timing(slideAnim, {
-            toValue: 295,
+            toValue: 250,
             duration: 300,
             useNativeDriver: true,
         }).start(() => setWeightPopupVisible(true));
@@ -84,29 +109,25 @@ export default function WeightScreen() {
             useNativeDriver: true,
         }).start(() => setWeightPopupVisible(false));
     };
-    const calculateWeekAvg = () => {
+    const calculateWeekAvg = (days, weights = weightsByDate) => {
         let n = 0;
         let sum = 0;
         days.forEach((d) => {
-            if (weightsByDate[d.date] != -1) {
+            const val = weights[d.date];
+            if (val !== -1 && val != null && val !== "") {
                 n += 1;
-                sum += Number(weightsByDate[d.date]);
+                sum += Number(val);
             }
         });
-        console.log(n);
-        console.log(sum);
-        if (n == 0) {
-            setWeekAvg(0);
-            return;
-        }
-        setWeekAvg(Math.round((sum / n) * 10) / 10);
-
+        if (n === 0) return 0;
+        return Math.round((sum / n) * 10) / 10;
     }
     const submitWeight = async () => {
         slideOut();
+        const updated = { ...weightsByDate, [selectedDate]: weightInput };
+        setWeightsByDate(updated);
         setWeightInput(-1);
-        weightsByDate[selectedDate] = weightInput;
-        calculateWeekAvg();
+        setWeekAvg(calculateWeekAvg(daysThisWeek, updated));
         const response = await fetch(`http://192.168.68.105:5500/api/weights/add-weight`, {
             method: "POST",
             headers: {
@@ -118,8 +139,7 @@ export default function WeightScreen() {
             }),
 
         })
-
-        console.log(response.status);
+        console.log(response.status == 201 ? "Weight added" : "Failed to add weight");
         return;
     };
 
@@ -131,9 +151,6 @@ export default function WeightScreen() {
         if (!response.ok) throw new Error("Failed to fetch weights");
         return response.json();
     };
-
-
-
 
 
     return (
@@ -184,7 +201,7 @@ export default function WeightScreen() {
             </View>
 
             <View style={[styles.avgContainer, { height: 90, alignItems: "flex-end" }]}>
-                <View style={[styles.singleTextContainer, { height: 40, width: 150, backgroundColor: lightblueColor, justifyContent: "flex-end", alignItems: "flex-end" }]}>
+                <View style={[styles.singleTextContainer, { height: 40, width: 130, backgroundColor: lightblueColor, justifyContent: "flex-end", alignItems: "flex-end" }]}>
                     <Pressable style={{ alignSelf: "flex-start", justifyContent: "center" }}>
                         {({ pressed }) => (
                             <Text style={[styles.subtitle, { color: !pressed ? "white" : "grey" }]}>See All</Text>
@@ -196,14 +213,14 @@ export default function WeightScreen() {
                     <View>
                         <Text style={styles.subtitle}>Week avg: </Text>
                     </View>
-                    <Text style={[styles.subtitle, { color: "lightgrey", fontSize: 25 }]}>{weekAvg} </Text>
-                    <Text style={[styles.subtitle, { fontSize: 15, color: gainColor }]}>(0.01)</Text>
+                    <Text style={[styles.subtitle, { color: "lightgrey", fontSize: 25 }]}>{weekAvg}  </Text>
+                    <Text style={[styles.subtitle, { fontSize: 15, color: gainColor }]}>{Math.round((weekAvg - lastWeekAvg) * 10) / 10}</Text>
                 </View>
             </View>
 
             <View style={styles.weekRow}>
 
-                {days.map((d) => (
+                {daysThisWeek.map((d) => (
                     <TouchableOpacity
                         key={d.date}
                         style={[
@@ -215,12 +232,10 @@ export default function WeightScreen() {
                     >
                         <Text style={styles.weightFont}>{d.label}</Text>
                         <Text style={styles.number}>{d.dayNumber}</Text>
-                        <Text style={[styles.weightFont, { color: "black" }]}>{weightsByDate[d.date] != -1 ? weightsByDate[d.date] + 'kg' : ''}</Text>
+                        <Text style={[styles.weightFont, { color: "black" }]}>{weightsByDate[d.date] != -1 && weightsByDate[d.date] != null ? weightsByDate[d.date] + 'kg' : ''}</Text>
                     </TouchableOpacity>
                 ))}
             </View>
-
-
             <View style={styles.titleContainer}>
                 <Text style={styles.title}>graph</Text>
             </View>

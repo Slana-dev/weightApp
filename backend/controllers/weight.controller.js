@@ -36,32 +36,22 @@ export const addWeight = async (req, res, next) => {
 };
 
 export const getWeight = async (req, res, next) => {
-
     try {
         const { startDate, endDate } = req.query;
+
         const start = new Date(startDate);
         const end = new Date(endDate);
 
-        const weightsMap = new Map();
         const records = await Weight.find({
             date: { $gte: start, $lte: end }
         });
 
-        records.forEach((w) => {
-            console.log(w.date.toDateString())
-            weightsMap.set(w.date.toDateString(), w.weightKg);
-        });
-        const results = [];
-        let loop = new Date(startDate);
+        const data = records.map(w => ({
+            date: w.date.toISOString().slice(0, 10),
+            weightKg: w.weightKg
+        }));
 
-        while (loop <= end) {
-            results.push(weightsMap.get(loop.toDateString()) ?? -1);
-            var newDate = loop.setDate(loop.getDate() + 1);
-            loop = new Date(newDate);
-        }
-
-        res.status(200).json({ succes: true, data: results });
-
+        res.status(200).json({ succes: true, data });
     } catch (error) {
         next(error);
     }
